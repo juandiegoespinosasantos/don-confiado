@@ -27,6 +27,7 @@ _memory_store = {}
 def _get_history(user_id: str):
     if user_id not in _memory_store:
         _memory_store[user_id] = []
+
     return _memory_store[user_id]
 
 
@@ -37,11 +38,13 @@ def _append_message(user_id: str, role: str, content: str) -> None:
 
 def _history_as_text(user_id: str) -> str:
     lines = []
+
     for msg in _get_history(user_id):
         if msg.get("role") == "human":
             lines.append(f"Usuario: {msg.get('content', '')}")
         elif msg.get("role") == "ai":
             lines.append(f"Asistente: {msg.get('content', '')}")
+
     return "\n".join(lines)
 
 
@@ -51,6 +54,7 @@ class ChatWebService:
     @chat_webservice_api_router.post("/api/chat_v1.0")
     async def chat_with_memory(self, request: ChatRequestDTO):
         api_key = os.getenv("GOOGLE_API_KEY")
+
         if not api_key:
             api_key = input("Por favor, ingrese su API KEY de Google (GOOGLE_API_KEY): ")
             os.environ["GOOGLE_API_KEY"] = api_key
@@ -154,6 +158,7 @@ class ChatWebService:
     @chat_webservice_api_router.post("/api/chat_v1.1")
     async def chat_with_structure_output(self, request: ChatRequestDTO):
         api_key = os.getenv("GOOGLE_API_KEY")
+
         if not api_key:
             api_key = input("Por favor, ingrese su API KEY de Google (GOOGLE_API_KEY): ")
             os.environ["GOOGLE_API_KEY"] = api_key
@@ -202,6 +207,7 @@ class ChatWebService:
 
         result = model_with_structure.invoke(classify_text)
         print(result)
+
         user_intention = result[0]["args"].get("userintention")
 
         if user_intention == "Other":
@@ -291,7 +297,9 @@ class ChatWebService:
             ai_result = llm.invoke(prompt_text)
             reply = getattr(ai_result, "content", str(ai_result))
             _append_message(request.user_id, "ai", reply)
+
             print(ai_result)
+
             return {
                 "userintention": "Other",
                 "reply": reply,
@@ -332,6 +340,7 @@ class ChatWebService:
 
             completeness = completeness_model.invoke(completeness_text)
             print(completeness)
+
             is_complete = bool(completeness[0]["args"].get("is_complete", False))
             missing_fields = completeness[0]["args"].get("missing_fields", []) or []
 
@@ -391,8 +400,10 @@ class ChatWebService:
                 "Si un campo no está presente, omítelo (no devuelvas null).\n\n"
                 f"Mensaje del usuario: {request.message}"
             )
+
             extracted_payload = extractor.invoke(extract_text)
             print(extracted_payload)
+
             extracted = extracted_payload[0]["args"] if isinstance(extracted_payload, list) else extracted_payload
             tipo_documento = extracted.get("tipo_documento")
             numero_documento = extracted.get("numero_documento")
@@ -402,18 +413,22 @@ class ChatWebService:
 
             # Sanitizar registro (evitar null, vacíos y "null")
             def _valid_value(value: object) -> bool:
-                if value is None:
-                    return False
+                if value is None: return False
+
                 text = str(value).strip()
-                if text == "":
-                    return False
-                if text.lower() == "null":
-                    return False
+
+                if text == "": return False
+
+                if text.lower() == "null": return False
+
                 return True
 
             # Validación credenciales Supabase
             supabase_url = os.getenv("SUPABASE_URL")
+            print(f"supabase_url={supabase_url}")
             supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            print(f"supabase_key={supabase_key}")
+
             if not supabase_url or not supabase_key:
                 # Respuesta breve informando falta de credenciales
                 user_input = request.message
@@ -425,9 +440,11 @@ class ChatWebService:
                     f"Usuario: {user_input}\n"
                     f"Asistente:"
                 )
+
                 reply_obj = llm.invoke(creds_text)
                 reply_text = getattr(reply_obj, "content", str(reply_obj))
                 _append_message(request.user_id, "ai", reply_text)
+
                 return {
                     "userintention": "Create_distribuitor",
                     "status": "error",
@@ -438,6 +455,7 @@ class ChatWebService:
 
             # Inicialización cliente Supabase
             global _supabase_client
+
             try:
                 _supabase_client
             except NameError:
@@ -469,7 +487,7 @@ class ChatWebService:
                     "data": data,
                     "reply": reply_text,
                 }
-            except Exception as e:
+            except Exception as ex:
                 # Manejo de error al crear distribuidor (prompt plano)
                 user_input = request.message
 
@@ -483,10 +501,11 @@ class ChatWebService:
                 reply_obj = llm.invoke(error_text)
                 reply_text = getattr(reply_obj, "content", str(reply_obj))
                 _append_message(request.user_id, "ai", reply_text)
+
                 return {
                     "userintention": "Create_distribuitor",
                     "status": "error",
-                    "error": str(e),
+                    "error": str(ex),
                     "reply": reply_text,
                     "extracted": extracted,
                 }

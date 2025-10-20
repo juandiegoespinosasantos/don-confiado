@@ -147,6 +147,7 @@ class ChatWebService02:
             conversation = []
             conversation.append(SystemMessage(content=DONCONFIADO_SYSTEM_PROMPT))
             self._conversations[conversation_id] = conversation
+
             return conversation 
 
     def _history_as_text(self, user_id: str) -> str:
@@ -161,11 +162,13 @@ class ChatWebService02:
         """
         lines = []
         conversation = self.find_conversation(user_id)
+
         for msg in conversation:
             if isinstance(msg, HumanMessage):
                 lines.append(f"Usuario: {msg.content}")
             elif isinstance(msg, AIMessage):
                 lines.append(f"Asistente: {msg.content}")
+
         return "\n".join(lines)
     
     # =============================================================================
@@ -186,6 +189,7 @@ class ChatWebService02:
             HTTPException: If there's an error saving the product
         """
         session = SessionLocal()
+
         try:
             producto_dao = ProductoDAO(session)
             tercero_dao = TerceroDAO(session)
@@ -200,9 +204,11 @@ class ChatWebService02:
             
             # Find or lookup provider if specified
             proveedor_id = None
+
             if payload.proveedor:
                 # Try to find provider by numero_documento (NIT) or razon_social
                 proveedor = tercero_dao.findByNumeroDocumento(payload.proveedor)
+
                 if proveedor:
                     proveedor_id = proveedor.id
                     print(f"📦 Provider found: {proveedor.razon_social or proveedor.nombres}")
@@ -222,12 +228,13 @@ class ChatWebService02:
             saved_product = producto_dao.create(nuevo_producto)
             
             print(f"✅ Product saved successfully: {saved_product}")
-            return saved_product
-            
-        except Exception as e:
+
+            return saved_product            
+        except Exception as ex:
             session.rollback()
-            print(f"❌ Error saving product: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error al guardar el producto: {str(e)}")
+            print(f"❌ Error saving product: {str(ex)}")
+
+            raise HTTPException(status_code=500, detail=f"Error al guardar el producto: {str(ex)}")
         finally:
             session.close()
     
@@ -246,6 +253,7 @@ class ChatWebService02:
             HTTPException: If there's an error saving the tercero
         """
         session = SessionLocal()
+
         try:
             tercero_dao = TerceroDAO(session)
             
@@ -268,12 +276,14 @@ class ChatWebService02:
             saved_tercero = tercero_dao.create(nuevo_tercero)
             
             print(f"✅ {tipo_tercero.capitalize()} saved successfully: {saved_tercero}")
+            
             return saved_tercero
             
-        except Exception as e:
+        except Exception as ex:
             session.rollback()
-            print(f"❌ Error saving {tipo_tercero}: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error al guardar el {tipo_tercero}: {str(e)}")
+            print(f"❌ Error saving {tipo_tercero}: {str(ex)}")
+
+            raise HTTPException(status_code=500, detail=f"Error al guardar el {tipo_tercero}: {str(ex)}")
         finally:
             session.close()
     
@@ -313,10 +323,10 @@ class ChatWebService02:
             print(f"Items count: {len(invoice_data.items)}")
             print("=========================================================")
             
-            return invoice_data
-            
-        except Exception as e:
-            print(f"⚠️ Failed to extract invoice data: {str(e)}")
+            return invoice_data            
+        except Exception as ex:
+            print(f"⚠️ Failed to extract invoice data: {str(ex)}")
+
             return None
     
     def _enrich_intention_with_invoice(self, result, invoice_data):
@@ -333,18 +343,19 @@ class ChatWebService02:
         Returns:
             UserIntention object with enriched payloads
         """
-        if not invoice_data:
-            return result
+        if not invoice_data: return result
         
         from ai.schemas.facturas import PayloadCreateProvider, PayloadCreateProduct
         
         # If intention is create_provider and we have invoice data, use emisor data
         if result.userintention == "create_provider":
             print("📝 Enriching provider payload with invoice emisor data...")
+            
             result.payload_provider = PayloadCreateProvider(
                 nombre=invoice_data.emisor.razonSocial,
                 nit=invoice_data.emisor.nit
             )
+            
             print(f"✅ Provider payload enriched: {result.payload_provider.nombre}")
         
         # If intention is create_product and we have invoice items, use first item
@@ -363,6 +374,7 @@ class ChatWebService02:
                 cantidad=int(first_item.cantidad),
                 proveedor=invoice_data.emisor.nit  # Link to provider by NIT
             )
+
             print(f"✅ Product payload enriched: {result.payload_product.nombre}")
         
         return result
@@ -407,6 +419,7 @@ class ChatWebService02:
         
         # Extract invoice data if image is present
         invoice_data = None
+
         if has_image:
             print("🔍 Attempting to extract invoice data from image...")
             invoice_data = self._extract_invoice_from_image(llm, message_content)
@@ -429,9 +442,9 @@ class ChatWebService02:
         try:
             ai_result = llm.invoke(conversation)
             reply = getattr(ai_result, "content", str(ai_result))
-        except Exception as e:
+        except Exception as ex:
             # If multimodal conversation fails, fall back to text-only
-            print(f"⚠️ Multimodal response failed, using text-only: {str(e)}")
+            print(f"⚠️ Multimodal response failed, using text-only: {str(ex)}")
             fallback_messages = [
                 SystemMessage(content=DONCONFIADO_SYSTEM_PROMPT),
                 HumanMessage(content=user_input)
@@ -473,8 +486,8 @@ class ChatWebService02:
                     "type": "image_url",
                     "image_url": {"url": file_url}
                 })
-                print(f"📸 Image received with MIME type: {request.mime_type}")
-            
+
+                print(f"📸 Image received with MIME type: {request.mime_type}")            
             elif request.mime_type.startswith("audio/"):
                 has_audio = True
                 # Use media format as supported by LangChain Google GenAI
@@ -483,8 +496,7 @@ class ChatWebService02:
                     "data": request.file_base64,
                     "mime_type": request.mime_type
                 })
-                print(f"🎤 Audio received: {request.mime_type}")
-            
+                print(f"🎤 Audio received: {request.mime_type}")            
             else:
                 print(f"⚠️ Unsupported MIME type: {request.mime_type}")
         
@@ -509,8 +521,10 @@ class ChatWebService02:
         
         # Build media context
         media_context = ""
+
         if has_image:
             media_context += "\nNOTA: El usuario adjuntó una imagen (posiblemente una factura). Los datos de la imagen se extraerán automáticamente."
+        
         if has_audio:
             media_context += "\nNOTA: El usuario envió un mensaje de audio. Escucha y transcribe el audio, luego clasifica la intención."
         
@@ -541,11 +555,12 @@ class ChatWebService02:
                 classification_content.append(content_item)
             
             classification_message = HumanMessage(content=classification_content)
+            
             try:
                 return model_with_structure.invoke([classification_message])
-            except Exception as e:
+            except Exception as ex:
                 # Fallback to text-only if multimodal fails
-                print(f"⚠️ Multimodal classification failed: {str(e)}")
+                print(f"⚠️ Multimodal classification failed: {str(ex)}")
                 return model_with_structure.invoke(classify_instruction)
         else:
             # Text-only classification
@@ -584,8 +599,8 @@ class ChatWebService02:
                 saved_product = self._save_product(result.payload_product)
                 saved_entities['product'] = {'saved': True, 'entity': saved_product}
                 print(f"🎉 Product '{saved_product.nombre}' saved with SKU: {saved_product.sku}")
-            except Exception as e:
-                print(f"⚠️ Failed to save product: {str(e)}")
+            except Exception as ex:
+                print(f"⚠️ Failed to save product: {str(ex)}")
         
         # Handle create_provider intention
         if result.userintention == "create_provider" and result.payload_provider:
@@ -593,8 +608,8 @@ class ChatWebService02:
                 saved_provider = self._save_tercero(result.payload_provider, 'proveedor')
                 saved_entities['provider'] = {'saved': True, 'entity': saved_provider}
                 print(f"🎉 Provider '{saved_provider.razon_social}' saved with ID: {saved_provider.id}")
-            except Exception as e:
-                print(f"⚠️ Failed to save provider: {str(e)}")
+            except Exception as ex:
+                print(f"⚠️ Failed to save provider: {str(ex)}")
         
         # Handle create_client intention
         if result.userintention == "create_client" and result.payload_client:
@@ -602,8 +617,8 @@ class ChatWebService02:
                 saved_client = self._save_tercero(result.payload_client, 'cliente')
                 saved_entities['client'] = {'saved': True, 'entity': saved_client}
                 print(f"🎉 Client '{saved_client.razon_social}' saved with ID: {saved_client.id}")
-            except Exception as e:
-                print(f"⚠️ Failed to save client: {str(e)}")
+            except Exception as ex:
+                print(f"⚠️ Failed to save client: {str(ex)}")
         
         return saved_entities
     
@@ -630,6 +645,4 @@ class ChatWebService02:
             "payload_client": result.payload_client.model_dump() if result.payload_client else None,
             "payload_product": result.payload_product.model_dump() if result.payload_product else None,
             "invoice_data": invoice_data.model_dump() if invoice_data else None,
-        }
-
-        
+        }      

@@ -630,12 +630,7 @@ class ChatWebService02:
 
         payload_products: dict[PayloadCreateProduct] =  result.payload_products
         payload_provider: dict[PayloadCreateProvider] = result.payload_provider
-        
-        # Handle create_product intention
-        if ((is_create_product or is_create_full) and payload_products):
-            for product in payload_products:
-                _save_product(product)
-        
+                
         # Handle create_provider intention
         if ((is_create_provider or is_create_full) and payload_provider):
             _save_tercero(payload_provider, "proveedor", "provider")
@@ -643,6 +638,11 @@ class ChatWebService02:
         # Handle create_client intention
         if (is_create_client and result.payload_client):
             _save_tercero(payload_provider, "cliente", "client")
+
+        # Handle create_product intention
+        if ((is_create_product or is_create_full) and payload_products):
+            for product in payload_products:
+                _save_product(product)
         
         return saved_entities
     

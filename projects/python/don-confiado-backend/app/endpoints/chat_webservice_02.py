@@ -19,8 +19,7 @@ from business.dao.tercero_dao import TerceroDAO
 from business.entities.producto import Producto
 from business.entities.tercero import Tercero
 from business.common.connection import SessionLocal
-from ai.schemas.facturas import FacturaColombiana, UserIntention
-
+from ai.schemas.facturas import FacturaColombiana, UserIntention, PayloadCreateProvider, PayloadCreateProduct
 """
 Chat endpoints without using LangChain memory helpers.
 
@@ -347,8 +346,6 @@ class ChatWebService02:
         """
         if (not invoice_data): return result
         
-        from ai.schemas.facturas import PayloadCreateProvider, PayloadCreateProduct
-
         user_intention: str = result.userintention
         is_create_provider: bool = user_intention == "create_provider"
         is_create_product: bool = user_intention == "create_product"
@@ -372,7 +369,7 @@ class ChatWebService02:
 
             for item in invoice_data.items:           
                 # Calculate price from item data
-                precio_unitario: int = item.precioUnitario
+                precio_unitario: int = item.precioUnitario * 1_000
                 subtotal: int = item.subtotal
                 cantidad: int = item.cantidad
                 precio: int = precio_unitario if precio_unitario else (
@@ -602,60 +599,50 @@ class ChatWebService02:
         Returns:
             Dict with saved entities and success status
         """
+
         saved_entities = {
             'product': {'saved': False, 'entity': None},
             'provider': {'saved': False, 'entity': None},
             'client': {'saved': False, 'entity': None}
         }
+                
+        def _save_product(product: PayloadCreateProduct):
+            try:
+                saved_product = self._save_product(product)
+                saved_entities['product'] = {'saved': True, 'entity': saved_product}
+                print(f"🎉 Product '{saved_product.nombre}' saved with SKU: {saved_product.sku}")
+            except Exception as ex:
+                print(f"⚠️ Failed to save product: {str(ex)}") 
+        
+        def _save_tercero(obj: Tercero, type: str, key: str): 
+            try:
+                saved_provider = self._save_tercero(obj, type)
+                saved_entities[key] = {'saved': True, 'entity': saved_provider}
+                print(f"🎉 Provider '{saved_provider.razon_social}' saved with ID: {saved_provider.id}")
+            except Exception as ex:
+                print(f"⚠️ Failed to save provider: {str(ex)}")
 
         user_intention: str = result.userintention
+        is_create_product: bool = user_intention == "create_product"
+        is_create_provider: bool = user_intention == "create_provider"
+        is_create_client: bool = user_intention == "create_client"
+        is_create_full: bool = user_intention == "create_full"
+
+        payload_products: dict[PayloadCreateProduct] =  result.payload_products
+        payload_provider: dict[PayloadCreateProvider] = result.payload_provider
         
         # Handle create_product intention
-        if ((user_intention == "create_product") and result.payload_products):
-            try:
-                for product in result.payload_products:
-                    saved_product = self._save_product(product)
-                    saved_entities['product'] = {'saved': True, 'entity': saved_product}
-                    print(f"🎉 Product '{saved_product.nombre}' saved with SKU: {saved_product.sku}")
-            except Exception as ex:
-                print(f"⚠️ Failed to save product: {str(ex)}")
+        if ((is_create_product or is_create_full) and payload_products):
+            for product in payload_products:
+                _save_product(product)
         
         # Handle create_provider intention
-        if ((user_intention == "create_provider") and result.payload_provider):
-            try:
-                saved_provider = self._save_tercero(result.payload_provider, 'proveedor')
-                saved_entities['provider'] = {'saved': True, 'entity': saved_provider}
-                print(f"🎉 Provider '{saved_provider.razon_social}' saved with ID: {saved_provider.id}")
-            except Exception as ex:
-                print(f"⚠️ Failed to save provider: {str(ex)}")
+        if ((is_create_provider or is_create_full) and payload_provider):
+            _save_tercero(payload_provider, "proveedor", "provider")
         
         # Handle create_client intention
-        if ((user_intention == "create_client") and result.payload_client):
-            try:
-                saved_client = self._save_tercero(result.payload_client, 'cliente')
-                saved_entities['client'] = {'saved': True, 'entity': saved_client}
-                print(f"🎉 Client '{saved_client.razon_social}' saved with ID: {saved_client.id}")
-            except Exception as ex:
-                print(f"⚠️ Failed to save client: {str(ex)}")
-
-        # Handle create_provider intention
-        if ((user_intention == "create_full") and (result.payload_provider and result.payload_products)):
-            print("Vamos a crear full")
-
-            try:
-                saved_provider = self._save_tercero(result.payload_provider, 'proveedor')
-                saved_entities['provider'] = {'saved': True, 'entity': saved_provider}
-                print(f"🎉 Provider '{saved_provider.razon_social}' saved with ID: {saved_provider.id}")
-            except Exception as ex:
-                print(f"⚠️ Failed to save provider: {str(ex)}")
-
-            try:
-                for product in result.payload_products:
-                    saved_product = self._save_product(product)
-                    saved_entities['product'] = {'saved': True, 'entity': saved_product}
-                    print(f"🎉 Product '{saved_product.nombre}' saved with SKU: {saved_product.sku}")
-            except Exception as ex:
-                print(f"⚠️ Failed to save product: {str(ex)}")
+        if (is_create_client and result.payload_client):
+            _save_tercero(payload_provider, "cliente", "client")
         
         return saved_entities
     

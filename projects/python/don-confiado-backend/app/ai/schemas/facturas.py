@@ -29,13 +29,14 @@ class UserIntention(BaseModel):
     Este modelo captura tanto la intención del usuario como los datos necesarios para ejecutar esa intención,
     ya sea extraídos del texto, de imágenes (facturas), o de audio.
     """
-    userintention: Literal["create_provider", "create_client", "create_product", "other", "none", "bye"] = Field(
+    userintention: Literal["create_provider", "create_client", "create_product", "create_full", "other", "none", "bye"] = Field(
         ...,
         description=(
             "Intención detectada del usuario. Valores posibles:\n"
             "- 'create_provider': crear un proveedor (datos pueden venir del texto o de una factura)\n"
             "- 'create_client': crear un cliente\n"
             "- 'create_product': crear uno o más productos (datos pueden venir del texto o de items de factura)\n"
+            "- 'create_full': crear al mismo tiempo un proveedor y también productos asociados a él (puede venir de texto, audio o factura)\n"
             "- 'other': conversación casual u otro propósito\n"
             "- 'none': sin intención clara\n"
             "- 'bye': despedida"
@@ -49,9 +50,9 @@ class UserIntention(BaseModel):
         None,
         description="Datos del cliente a crear. Se llena si el usuario proporciona los datos por texto/audio"
     )
-    payload_product: Optional[PayloadCreateProduct] = Field(
+    payload_products: Optional[List[PayloadCreateProduct]] = Field(
         None,
-        description="Datos del producto a crear. Se llena automáticamente si hay una factura en la imagen (usando el primer item) o si el usuario proporciona los datos por texto/audio"
+        description="Datos del productos a crear. Se llena automáticamente si hay una factura en la imagen o si el usuario proporciona los datos por texto/audio"
     )
     audio_transcription: Optional[str] = Field(
         None,

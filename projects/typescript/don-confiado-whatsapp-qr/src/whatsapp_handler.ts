@@ -16,19 +16,18 @@ import {
 //import makeWASocket, { downloadMediaMessage } from "@whiskeysockets/baileys"
 import { createWriteStream, readFileSync } from "fs";
 
-
 import { rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-
 function fileToBase64(path: string): string {
   const fileBuffer = readFileSync(path);
+
   return fileBuffer.toString('base64');
 }
 
-
 class WhatsAppHandler {
+
   private sock!: WASocket;
   private qrAttempts = 0;
   private readonly maxQrAttempts = 3;
@@ -68,9 +67,7 @@ class WhatsAppHandler {
   }
 
   onCredsUpdate(q: any) {
-    console.log(
-      "--------------------[ onCredsUpdate  ]-------------------------"
-    );
+    console.log("--------------------[ onCredsUpdate  ]-------------------------");
     console.log("Credenciales actualizadas:", q);
     console.log("-----------------------------------------------------------");
 
@@ -98,6 +95,7 @@ class WhatsAppHandler {
    */
   async onMessagesUpsert(message_array: any) {
     console.log("--------------------[ sock.ev.on - messages.upsert ]-------------------------");
+
     //console.log("message.upsert:", m);
     for (const msg of message_array.messages) {
       console.log("Mensaje recibido:\n", msg);
@@ -125,14 +123,10 @@ class WhatsAppHandler {
             filename = join(tmpdir(), "downloaded-image." + mime_type.split('/')[1]);
 
             // download the media as a stream
-            const stream = await downloadMediaMessage(
-              msg,
-              'stream',
-              {},
-              {
-                logger: P({ level: "silent" }),
-                reuploadRequest: this.sock.updateMediaMessage
-              }
+            const stream = await downloadMediaMessage(msg, 'stream', {}, {
+              logger: P({ level: "silent" }),
+              reuploadRequest: this.sock.updateMediaMessage
+            }
             );
 
             // save the image file locally and wait for it to finish
@@ -143,14 +137,10 @@ class WhatsAppHandler {
             mime_type = msg.message.audioMessage.mimetype;
             filename = join(tmpdir(), "downloaded-audio." + mime_type.split('/')[1]);
 
-            const stream = await downloadMediaMessage(
-              msg,
-              'stream',
-              {},
-              {
-                logger: P({ level: "silent" }),
-                reuploadRequest: this.sock.updateMediaMessage
-              }
+            const stream = await downloadMediaMessage(msg, 'stream', {}, {
+              logger: P({ level: "silent" }),
+              reuploadRequest: this.sock.updateMediaMessage
+            }
             );
 
             // save the audio file locally and wait for it to finish
@@ -171,9 +161,7 @@ class WhatsAppHandler {
             msg.message.extendedTextMessage?.text ||
             "No texto disponible";
 
-          // fetch("http://127.0.0.1:8000/api/chat_v1.1", {
           fetch("http://127.0.0.1:8000/api/chat_v2.0", {
-          // fetch("http://127.0.0.1:8000/api/chat_clase_03", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -226,9 +214,7 @@ class WhatsAppHandler {
       if (err) return console.error("Error generating QR:", err);
 
       console.log(url);
-      console.log(
-        `📱 Escanea el código QR (${this.qrAttempts}/${this.maxQrAttempts})`
-      );
+      console.log(`📱 Escanea el código QR (${this.qrAttempts}/${this.maxQrAttempts})`);
     });
   }
 
@@ -240,9 +226,8 @@ class WhatsAppHandler {
       "❌ Conexión cerrada",
       (lastDisconnect?.error as any)?.output?.statusCode
     );
-    const shouldReconnect =
-      (lastDisconnect?.error as any)?.output?.statusCode !==
-      DisconnectReason.loggedOut;
+
+    const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
     console.log(
       "⚠️ Desconectado de WhatsApp reconnect",
       shouldReconnect,
@@ -272,9 +257,7 @@ class WhatsAppHandler {
     lastDisconnect?: { error: any };
     qr?: string;
   }) {
-    console.log(
-      "--------------------[ sock.ev.on - connection.update ]-------------------------"
-    );
+    console.log("--------------------[ sock.ev.on - connection.update ]-------------------------");
     console.log("Connection update:", update);
     console.log("-----------------------------------------------------------");
 

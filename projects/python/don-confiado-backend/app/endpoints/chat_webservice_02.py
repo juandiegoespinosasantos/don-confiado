@@ -33,7 +33,8 @@ and generates prompts as strings.
 # CONSTANTS
 # =============================================================================
 
-DONCONFIADO_SYSTEM_PROMPT = """ROLE:
+DONCONFIADO_SYSTEM_PROMPT = """
+ROLE:
 Don Confiado, un asistente de inteligencia artificial que actúa como un asesor
 empresarial confiable, experimentado y cercano. Es el socio virtual de las
 empresas que buscan organización, claridad y crecimiento.
@@ -104,7 +105,6 @@ INSTRUCCIONES ADICIONALES:
 - Adapta tu respuesta al contexto de la conversación.
 """
 
-
 # =============================================================================
 # ROUTER AND CLASS DEFINITION
 # =============================================================================
@@ -149,7 +149,6 @@ class ChatWebService02:
             self._conversations[conversation_id] = conversation
 
             return conversation 
-
     def _history_as_text(self, user_id: str) -> str:
         """
         Convert conversation history to text format for context.
@@ -205,7 +204,7 @@ class ChatWebService02:
             # Find or lookup provider if specified
             proveedor_id = None
 
-            if payload.proveedor:
+            if (payload.proveedor):
                 # Try to find provider by numero_documento (NIT) or razon_social
                 proveedor = tercero_dao.findByNumeroDocumento(payload.proveedor)
 
@@ -308,7 +307,10 @@ class ChatWebService02:
             
             # Instruction for invoice extraction (following Colab pattern)
             invoice_extraction_message = HumanMessage(content=[
-                {"type": "text", "text": "Analizar la imagen y extraer los datos de la factura según el schema proporcionado. Si la imagen no contiene una factura, responde con datos vacíos o nulos."},
+                {
+                    "type": "text",
+                    "text": "Analizar la imagen y extraer los datos de la factura según el schema proporcionado. Si la imagen no contiene una factura, responde con datos vacíos o nulos."
+                },
                 message_content[1]  # The image_url content
             ])
             
@@ -343,12 +345,17 @@ class ChatWebService02:
         Returns:
             UserIntention object with enriched payloads
         """
-        if not invoice_data: return result
+        if (not invoice_data): return result
         
         from ai.schemas.facturas import PayloadCreateProvider, PayloadCreateProduct
+
+        user_intention: str = result.userintention
+        is_create_provider: bool = user_intention == "create_provider"
+        is_create_product: bool = user_intention == "create_product"
+        is_create_full: bool = user_intention == "create_full"
         
         # If intention is create_provider and we have invoice data, use emisor data
-        if result.userintention == "create_provider":
+        if (is_create_provider or is_create_full):
             print("📝 Enriching provider payload with invoice emisor data...")
             
             result.payload_provider = PayloadCreateProvider(
@@ -359,24 +366,30 @@ class ChatWebService02:
             print(f"✅ Provider payload enriched: {result.payload_provider.nombre}")
         
         # If intention is create_product and we have invoice items, use first item
-        elif result.userintention == "create_product" and invoice_data.items:
+        if ((is_create_product or is_create_full) and invoice_data.items):
             print("📝 Enriching product payload with invoice item data...")
-            first_item = invoice_data.items[0]
-            
-            # Calculate price from item data
-            precio = first_item.precioUnitario if first_item.precioUnitario else (
-                first_item.subtotal / first_item.cantidad if first_item.subtotal and first_item.cantidad > 0 else 0
-            )
-            
-            result.payload_product = PayloadCreateProduct(
-                nombre=first_item.descripcion[:200],  # Truncate to max length
-                precio_venta=precio,
-                cantidad=int(first_item.cantidad),
-                proveedor=invoice_data.emisor.nit  # Link to provider by NIT
-            )
+            i: int = 0
 
-            print(f"✅ Product payload enriched: {result.payload_product.nombre}")
-        
+            for item in invoice_data.items:           
+                # Calculate price from item data
+                precio_unitario: int = item.precioUnitario
+                subtotal: int = item.subtotal
+                cantidad: int = item.cantidad
+                precio: int = precio_unitario if precio_unitario else (
+                    (subtotal / cantidad) if (subtotal and cantidad > 0) else 0
+                )
+            
+                result.payload_products[i] = PayloadCreateProduct(
+                    nombre=item.descripcion[:200],  # Truncate to max length
+                    precio_venta=precio,
+                    cantidad=int(cantidad),
+                    proveedor=invoice_data.emisor.nit  # Link to provider by NIT
+                )
+
+                print(f"✅ Product payload enriched: {result.payload_products[i].nombre}")
+
+                i += 1
+
         return result
     
     # =============================================================================
@@ -412,7 +425,7 @@ class ChatWebService02:
         message_content, has_image, has_audio = self._process_multimodal_content(request)
         
         # Add message to conversation
-        if len(message_content) == 1:
+        if (len(message_content) == 1):
             conversation.append(HumanMessage(content=user_input))
         else:
             conversation.append(HumanMessage(content=message_content))
@@ -420,23 +433,23 @@ class ChatWebService02:
         # Extract invoice data if image is present
         invoice_data = None
 
-        if has_image:
+        if (has_image):
             print("🔍 Attempting to extract invoice data from image...")
             invoice_data = self._extract_invoice_from_image(llm, message_content)
         
         # Classify user intention
-        result = self._classify_user_intention(llm, request.user_id, user_input, message_content, has_image, has_audio)
+        user_intention = self._classify_user_intention(llm, request.user_id, user_input, message_content, has_image, has_audio)
         
         # Enrich intention with invoice data
-        if invoice_data:
+        if (invoice_data):
             print("🔄 Enriching intention with invoice data...")
-            result = self._enrich_intention_with_invoice(result, invoice_data)
+            user_intention = self._enrich_intention_with_invoice(user_intention, invoice_data)
         
         # Log intention detection results
-        self._log_intention_results(result, has_audio)
+        self._log_intention_results(user_intention, has_audio)
         
         # Save entities based on detected intention
-        saved_entities = self._save_entities_from_intention(result)
+        saved_entities = self._save_entities_from_intention(user_intention)
         
         # Generate AI response
         try:
@@ -451,13 +464,14 @@ class ChatWebService02:
             ]
             ai_result = llm.invoke(fallback_messages)
             reply = getattr(ai_result, "content", str(ai_result))
+
         conversation.append(AIMessage(content=reply))
         
         print("===REPLY===")
         print(reply)
         
         # Return comprehensive response
-        return self._build_response(result, reply, saved_entities, has_image, has_audio, invoice_data)
+        return self._build_response(user_intention, reply, saved_entities, has_image, has_audio, invoice_data)
     
     # =============================================================================
     # HELPER METHODS FOR MAIN ENDPOINT
@@ -477,10 +491,10 @@ class ChatWebService02:
         has_image = False
         has_audio = False
         
-        if request.file_base64 and request.mime_type:
+        if (request.file_base64 and request.mime_type):
             file_url = f"data:{request.mime_type};base64,{request.file_base64}"
             
-            if request.mime_type.startswith("image/"):
+            if (request.mime_type.startswith("image/")):
                 has_image = True
                 message_content.append({
                     "type": "image_url",
@@ -488,7 +502,7 @@ class ChatWebService02:
                 })
 
                 print(f"📸 Image received with MIME type: {request.mime_type}")            
-            elif request.mime_type.startswith("audio/"):
+            elif (request.mime_type.startswith("audio/")):
                 has_audio = True
                 # Use media format as supported by LangChain Google GenAI
                 message_content.append({
@@ -522,19 +536,20 @@ class ChatWebService02:
         # Build media context
         media_context = ""
 
-        if has_image:
+        if (has_image):
             media_context += "\nNOTA: El usuario adjuntó una imagen (posiblemente una factura). Los datos de la imagen se extraerán automáticamente."
         
-        if has_audio:
+        if (has_audio):
             media_context += "\nNOTA: El usuario envió un mensaje de audio. Escucha y transcribe el audio, luego clasifica la intención."
         
         classify_instruction = (
             "Eres un asistente de voz para gestión comercial.\n"
             "Clasifica la intención del usuario y extrae los datos mencionados según el schema.\n"
-            "Intenciones disponibles: create_provider, create_client, create_product, other, none, bye.\n"
-            "- 'create_provider': cuando el usuario quiere crear un proveedor (puede venir de texto, audio o factura)\n"
+            "Intenciones disponibles: create_provider, create_client, create_product, create_full, other, none, bye.\n"
+            "- 'create_provider': cuando el usuario sólo quiere crear un proveedor (puede venir de texto, audio o factura)\n"
             "- 'create_client': cuando el usuario quiere crear un cliente\n"
-            "- 'create_product': cuando el usuario quiere crear un producto (puede venir de texto, audio o factura)\n"
+            "- 'create_product': cuando el usuario sólo quiere crear un producto (puede venir de texto, audio o factura)\n"
+            "- 'create_full': cuando el usuario quiere crear al mismo tiempo un proveedor y también productos asociados a él (puede venir de texto, audio o factura)\n"
             "- 'other': conversación casual u otro propósito\n"
             "- 'none': sin intención clara\n"
             "- 'bye': despedida\n"
@@ -546,7 +561,7 @@ class ChatWebService02:
         )
         
         # Use multimodal classification if needed
-        if has_audio or has_image:
+        if (has_audio or has_image):
             # Build classification message with text instruction + media content
             classification_content = [{"type": "text", "text": classify_instruction}]
             
@@ -573,7 +588,7 @@ class ChatWebService02:
         print(f"Audio Transcription: {result.audio_transcription if has_audio else 'N/A'}")
         print(f"Payload Provider: {result.payload_provider}")
         print(f"Payload Client: {result.payload_client}")
-        print(f"Payload Product: {result.payload_product}")
+        print(f"Payload Product: {result.payload_products}")
         print(f"Full Result: {result}")
         print("=========================================================")
     
@@ -592,18 +607,21 @@ class ChatWebService02:
             'provider': {'saved': False, 'entity': None},
             'client': {'saved': False, 'entity': None}
         }
+
+        user_intention: str = result.userintention
         
         # Handle create_product intention
-        if result.userintention == "create_product" and result.payload_product:
+        if ((user_intention == "create_product") and result.payload_products):
             try:
-                saved_product = self._save_product(result.payload_product)
-                saved_entities['product'] = {'saved': True, 'entity': saved_product}
-                print(f"🎉 Product '{saved_product.nombre}' saved with SKU: {saved_product.sku}")
+                for product in result.payload_products:
+                    saved_product = self._save_product(product)
+                    saved_entities['product'] = {'saved': True, 'entity': saved_product}
+                    print(f"🎉 Product '{saved_product.nombre}' saved with SKU: {saved_product.sku}")
             except Exception as ex:
                 print(f"⚠️ Failed to save product: {str(ex)}")
         
         # Handle create_provider intention
-        if result.userintention == "create_provider" and result.payload_provider:
+        if ((user_intention == "create_provider") and result.payload_provider):
             try:
                 saved_provider = self._save_tercero(result.payload_provider, 'proveedor')
                 saved_entities['provider'] = {'saved': True, 'entity': saved_provider}
@@ -612,13 +630,32 @@ class ChatWebService02:
                 print(f"⚠️ Failed to save provider: {str(ex)}")
         
         # Handle create_client intention
-        if result.userintention == "create_client" and result.payload_client:
+        if ((user_intention == "create_client") and result.payload_client):
             try:
                 saved_client = self._save_tercero(result.payload_client, 'cliente')
                 saved_entities['client'] = {'saved': True, 'entity': saved_client}
                 print(f"🎉 Client '{saved_client.razon_social}' saved with ID: {saved_client.id}")
             except Exception as ex:
                 print(f"⚠️ Failed to save client: {str(ex)}")
+
+        # Handle create_provider intention
+        if ((user_intention == "create_full") and (result.payload_provider and result.payload_products)):
+            print("Vamos a crear full")
+
+            try:
+                saved_provider = self._save_tercero(result.payload_provider, 'proveedor')
+                saved_entities['provider'] = {'saved': True, 'entity': saved_provider}
+                print(f"🎉 Provider '{saved_provider.razon_social}' saved with ID: {saved_provider.id}")
+            except Exception as ex:
+                print(f"⚠️ Failed to save provider: {str(ex)}")
+
+            try:
+                for product in result.payload_products:
+                    saved_product = self._save_product(product)
+                    saved_entities['product'] = {'saved': True, 'entity': saved_product}
+                    print(f"🎉 Product '{saved_product.nombre}' saved with SKU: {saved_product.sku}")
+            except Exception as ex:
+                print(f"⚠️ Failed to save product: {str(ex)}")
         
         return saved_entities
     
@@ -643,6 +680,6 @@ class ChatWebService02:
             "audio_transcription": result.audio_transcription if has_audio else None,
             "payload_provider": result.payload_provider.model_dump() if result.payload_provider else None,
             "payload_client": result.payload_client.model_dump() if result.payload_client else None,
-            "payload_product": result.payload_product.model_dump() if result.payload_product else None,
+            "payload_products": [product.model_dump() for product in result.payload_products] if result.payload_products else None,
             "invoice_data": invoice_data.model_dump() if invoice_data else None,
-        }      
+        }

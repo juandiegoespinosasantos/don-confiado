@@ -16,17 +16,15 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 # Local imports
 from endpoints.dto.message_dto import ChatRequestDTO
 from business.common.connection import SessionLocal, engine
-
+from business.enums.vector_search_type import VectorSearchType
 
 chat_clase_03_api_router = APIRouter()
-
 
 # Constants
 # Google GenAI embeddings expect fully-qualified model id: "models/text-embedding-004"
 EMBEDDING_MODEL_NAME = "models/text-embedding-004"  # 768-dim as of Google GenAI
 EMBEDDING_DIM = 768 #dimensiones del embedding
 CHAT_MODEL_NAME = "gemini-2.5-flash"
-
 
 DONCONFIADO_RAG_SYSTEM = (
     "Eres Don Confiado, asesor empresarial. Usa estrictamente el contexto recuperado "
@@ -79,32 +77,37 @@ def _create_vector_tables(session: Session) -> None:
 # Chunking: Dividir textos largos en partes ("chunks") más pequeñas y solapadas facilita el procesamiento y la búsqueda semántica.
 # El sobrelapamiento ("overlap") entre chunks asegura contexto suficiente entre segmentos consecutivos.
 def _chunk_text(text_value: str, chunk_size: int = 600, overlap: int = 100) -> List[str]:
-    if not text_value:
-        return []
+    if (not text_value): return []
+    
     text_value = text_value.strip()
-    if not text_value:
-        return []
+
+    if (not text_value): return []
+    
     chunks: List[str] = []
     start = 0
     n = len(text_value)
-    while start < n:
+
+    while (start < n):
         end = min(start + chunk_size, n)
         chunks.append(text_value[start:end])
-        if end == n:
-            break
+
+        if (end == n): break
+
         start = max(0, end - overlap)
+
     return chunks
 
 # Convierte una lista de valores float a un string SQL válido para el vector
 def _arr_to_sql_vector(values: List[float]) -> str:
     # Build ARRAY[...]::vector(D)
     floats = ",".join(f"{v:.8f}" for v in values)
+
     return f"ARRAY[{floats}]::vector({EMBEDDING_DIM})"
 
 # Convierte una lista de textos a una lista de vectores
 def _embed_texts(emb: GoogleGenerativeAIEmbeddings, texts: List[str]) -> List[List[float]]:
-    if not texts:
-        return []
+    if (not texts): return []
+
     return emb.embed_documents(texts)
 
 # Construye el contenido del producto
@@ -115,6 +118,7 @@ def _build_product_content(row: Dict[str, Any]) -> str:
         if row.get("proveedor_id")
         else "Proveedor: N/A"
     )
+
     return (
         f"Producto: {row.get('nombre')}. SKU: {row.get('sku')}. "
         f"Precio: {row.get('precio_venta')}. Cantidad: {row.get('cantidad')}. "
@@ -123,9 +127,10 @@ def _build_product_content(row: Dict[str, Any]) -> str:
 
 # Construye el contenido del tercero
 def _build_tercero_content(row: Dict[str, Any]) -> str:
-    nombre = row.get("razon_social") or (
-        (row.get("nombres") or "") + " " + (row.get("apellidos") or "")
-    ).strip()
+    razon_social: str = row.get("razon_social")
+    nombre_completo: str = (row.get("nombres") or "") + " " + (row.get("apellidos") or "")
+    nombre = (razon_social or nombre_completo).strip()
+
     return (
         f"Nombre: {nombre}. Documento: {row.get('tipo_documento')} {row.get('numero_documento')}. "
         f"Tel: {row.get('telefono_celular') or row.get('telefono_fijo') or ''}. "
@@ -138,23 +143,31 @@ def _build_tercero_content(row: Dict[str, Any]) -> str:
 class ChatClase03:
     def __init__(self):
         load_dotenv()
+
         self.google_api_key = os.getenv("GOOGLE_API_KEY")
-        if not self.google_api_key:
+
+        if (not self.google_api_key):
             raise RuntimeError("GOOGLE_API_KEY no configurada")
+        
         self.embeddings = GoogleGenerativeAIEmbeddings(
             model=EMBEDDING_MODEL_NAME,
-            google_api_key=self.google_api_key,
+            google_api_key=self.google_api_key
         )
 
     # se encarga de asegurar que la extension pg_vector esté instalada en supabase y crear las tablas de vector de productos
     @chat_clase_03_api_router.post("/api/setup_pgvector")
     def setup_pgvector(self):
         session = SessionLocal()
+
         try:
             _ensure_pgvector_extension(session)
             _create_vector_tables(session)
             session.commit()
-            return {"ok": True, "message": "PGVector y tablas creadas"}
+
+            return {
+                "ok": True, 
+                "message": "PGVector y tablas creadas"
+            }
         except Exception as e:
             session.rollback()
             raise HTTPException(status_code=500, detail=str(e))
@@ -165,6 +178,7 @@ class ChatClase03:
     @chat_clase_03_api_router.post("/api/sync_embeddings")
     def sync_embeddings(self):
         session = SessionLocal()
+        
         try:
             # Productos (join con terceros para obtener el nombre del proveedor)
             productos = session.execute(text(
@@ -182,6 +196,7 @@ class ChatClase03:
             )).mappings().all()
             prod_texts = [_build_product_content(p) for p in productos]
             prod_vecs = _embed_texts(self.embeddings, prod_texts)
+
             for row, vec, content in zip(productos, prod_vecs, prod_texts):
                 sql = text(
                     f"""
@@ -194,10 +209,12 @@ class ChatClase03:
                         created_at = NOW();
                     """
                 ).bindparams(bindparam("metadata", type_=JSONB))
+
                 metadata_payload = {
                     "proveedor_id": row.get("proveedor_id"),
                     "proveedor_nombre": row.get("proveedor_nombre"),
                 }
+
                 session.execute(sql, {"source_id": row["id"], "content": content, "metadata": metadata_payload})
 
             # Proveedores (terceros tipo proveedor) con segmentación
@@ -208,15 +225,17 @@ class ChatClase03:
                 FROM terceros WHERE tipo_tercero = 'proveedor'
                 """
             )).mappings().all()
-            for prov in proveedores:
-                base_text = _build_tercero_content(prov)
+
+            for proveedor in proveedores:
+                base_text = _build_tercero_content(proveedor)
+
                 chunks = _chunk_text(base_text, chunk_size=600, overlap=100)
-                if not chunks:
-                    chunks = [base_text]
+                if (not chunks): chunks = [base_text]
+                
                 chunk_vecs = _embed_texts(self.embeddings, chunks)
+
                 for idx, (chunk, vec) in enumerate(zip(chunks, chunk_vecs)):
-                    sql = text(
-                        f"""
+                    sql: str = text(f"""
                         INSERT INTO proveedores_vec (source_id, chunk_index, content, embedding, metadata)
                         VALUES (:source_id, :chunk_index, :content, { _arr_to_sql_vector(vec) }, '{{}}'::jsonb)
                         ON CONFLICT (source_id, chunk_index) DO UPDATE SET
@@ -224,17 +243,26 @@ class ChatClase03:
                             embedding = EXCLUDED.embedding,
                             metadata = EXCLUDED.metadata,
                             created_at = NOW();
-                        """
-                    )
-                    session.execute(sql, {"source_id": prov["id"], "chunk_index": idx, "content": chunk})
+                        """)
+                    params: dict[str, Any] = {
+                        "source_id": proveedor["id"],
+                        "chunk_index": idx,
+                        "content": chunk
+                    }
+
+                    session.execute(sql, params)
 
             # Clientes: eliminado
 
             session.commit()
-            return {"ok": True, "message": "Embeddings sincronizados"}
-        except Exception as e:
+
+            return {
+                "ok": True, 
+                "message": "Embeddings sincronizados"
+            }
+        except Exception as ex:
             session.rollback()
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(ex))
         finally:
             session.close()
 
@@ -242,22 +270,30 @@ class ChatClase03:
     # <->: indica que se está usando la distancia euclidiana (L2) para medir la similitud entre el vector de la pregunta y el vector de los productos, proveedores y clientes
     # <=>: indica que se está usando la distancia coseno para medir la similitud entre el vector de la pregunta y el vector de los productos, proveedores y clientes
     # <#>: indica que se está usando la distancia del producto punto para medir la similitud entre el vector de la pregunta y el vector de los productos, proveedores y clientes
-    def _search_context(self, session: Session, query_text: str, top_k: int = 8) -> List[Dict[str, Any]]:
+    def _search_context(self, session: Session, query_text: str, vector_search_type: VectorSearchType, top_k: int = 8) -> List[Dict[str, Any]]:
         q_vec = self.embeddings.embed_query(query_text)
         q_vec_sql = _arr_to_sql_vector(q_vec)
-        results = session.execute(text(
-            f"""
+
+        vector_search_type_operator: str = vector_search_type.operator
+        print(f"Realizará la consulta de vectores mediante: {vector_search_type.value} ({vector_search_type_operator})")
+
+        sql: str = text(f"""
             WITH q AS (SELECT {q_vec_sql} AS embedding)
-            SELECT 'producto' AS source, pv.source_id, pv.content, (pv.embedding <-> q.embedding) AS distance
+            SELECT 'producto' AS source, pv.source_id, pv.content, (pv.embedding {vector_search_type_operator} q.embedding) AS distance
             FROM productos_vec pv, q
             UNION ALL
-            SELECT 'proveedor' AS source, pr.source_id, pr.content, (pr.embedding <-> q.embedding) AS distance
+            SELECT 'proveedor' AS source, pr.source_id, pr.content, (pr.embedding {vector_search_type_operator} q.embedding) AS distance
             FROM proveedores_vec pr, q
             -- clientes_vec eliminado
             ORDER BY distance ASC
             LIMIT :k
-            """
-        ), {"k": top_k}).mappings().all()
+            """)
+        params = {
+            "k": top_k
+        }
+
+        results = session.execute(sql, params).mappings().all()
+
         return [dict(r) for r in results]
 
     def _build_rag_prompt(self, question: str, contexts: List[Dict[str, Any]]) -> List[HumanMessage]:
@@ -267,17 +303,19 @@ class ChatClase03:
             "\n\nPregunta del usuario: " + question +
             "\n\nResponde en 2–4 frases, en español, claras y accionables."
         )
+
         return [
             SystemMessage(content=DONCONFIADO_RAG_SYSTEM),
             HumanMessage(content=user_text),
         ]
 
     @chat_clase_03_api_router.post("/api/chat_clase_03")
-    def chat_rag(self, request: ChatRequestDTO):
+    def chat_rag(self, request: ChatRequestDTO, vector_search_type: VectorSearchType=VectorSearchType.EUCLIDEAN_DISTANCE):
         session = SessionLocal()
+
         try:
             # Retrieve relevant context
-            contexts = self._search_context(session, request.message, top_k=8)
+            contexts = self._search_context(session, request.message, vector_search_type, top_k=8)
 
             # Initialize chat model
             llm = init_chat_model(CHAT_MODEL_NAME, model_provider="google_genai", api_key=self.google_api_key)
@@ -290,9 +328,7 @@ class ChatClase03:
                 "reply": reply,
                 "contexts": contexts,
             }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
         finally:
             session.close()
-
-

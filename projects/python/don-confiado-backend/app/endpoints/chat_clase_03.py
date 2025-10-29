@@ -42,11 +42,12 @@ def _create_vector_tables(session: Session) -> None:
         CREATE TABLE IF NOT EXISTS productos_vec (
             id BIGSERIAL PRIMARY KEY,
             source_id INTEGER REFERENCES productos(id) ON DELETE CASCADE,
+            chunk_index INTEGER DEFAULT 0,
             content TEXT,
             embedding vector({EMBEDDING_DIM}),
             metadata JSONB,
             created_at TIMESTAMP DEFAULT NOW(),
-            UNIQUE (source_id)
+            UNIQUE (source_id, chunk_index)
         );
     """))
     session.execute(text(f"""
@@ -137,6 +138,102 @@ def _build_tercero_content(row: Dict[str, Any]) -> str:
         f"Dirección: {row.get('direccion') or ''}. Email: {row.get('email') or row.get('email_facturacion') or ''}."
     )
 
+def _sync_productos_embedding(session, embeddings: List[List[float]]):
+    sql_select: str = text("""
+        SELECT 
+            p.id,
+            p.sku,
+            p.nombre,
+            p.precio_venta,
+            p.cantidad,
+            p.proveedor_id,
+            COALESCE(t.razon_social, (COALESCE(t.nombres, '') || ' ' || COALESCE(t.apellidos, ''))) AS proveedor_nombre
+        FROM 
+            productos p
+        LEFT JOIN terceros t ON t.id = p.proveedor_id
+        """)
+    productos = session.execute(sql_select).mappings().all()
+
+    for producto in productos:
+        base_text = _build_product_content(producto)
+
+        chunks = _chunk_text(base_text, chunk_size=600, overlap=100)
+        if (not chunks): chunks = [base_text]
+
+        chunk_vecs = _embed_texts(embeddings, chunks)
+
+        for idx, (chunk, vec) in enumerate(zip(chunks, chunk_vecs)):
+            sql_insert = text(f"""
+                INSERT INTO 
+                    productos_vec (source_id, chunk_index, content, embedding, metadata)
+                VALUES (:source_id, :chunk_index, :content, { _arr_to_sql_vector(vec) }, :metadata)
+                ON CONFLICT (source_id, chunk_index) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    embedding = EXCLUDED.embedding,
+                    metadata = EXCLUDED.metadata,
+                    created_at = NOW();
+                """).bindparams(bindparam("metadata", type_=JSONB))
+
+        params_insert: dict[str, Any] = {
+            "source_id": producto["id"],
+            "chunk_index": idx,
+            "content": chunk,
+            "metadata": {
+                "proveedor_id": producto["proveedor_id"],
+                "proveedor_nombre": producto["proveedor_nombre"],
+            }
+        }
+
+        session.execute(sql_insert, params_insert)
+
+def _sync_proveedor_embedding(session, embeddings: List[List[float]]):
+    sql_select: str = text("""
+        SELECT 
+            id, 
+            tipo_documento, 
+            numero_documento, 
+            razon_social, 
+            nombres, 
+            apellidos, 
+            telefono_fijo, 
+            telefono_celular, 
+            direccion, 
+            email, 
+            email_facturacion
+        FROM 
+            terceros 
+        WHERE 
+            tipo_tercero = 'proveedor'
+        """)
+    proveedores = session.execute(sql_select).mappings().all()
+
+    for proveedor in proveedores:
+        base_text = _build_tercero_content(proveedor)
+
+        chunks = _chunk_text(base_text, chunk_size=600, overlap=100)
+        if (not chunks): chunks = [base_text]
+                
+        chunk_vecs = _embed_texts(embeddings, chunks)
+
+        for idx, (chunk, vec) in enumerate(zip(chunks, chunk_vecs)):
+            sql_insert: str = text(f"""
+                INSERT INTO proveedores_vec (source_id, chunk_index, content, embedding, metadata)
+                VALUES (:source_id, :chunk_index, :content, { _arr_to_sql_vector(vec) }, '{{}}'::jsonb)
+                ON CONFLICT (source_id, chunk_index) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    embedding = EXCLUDED.embedding,
+                    metadata = EXCLUDED.metadata,
+                    created_at = NOW();
+                """)
+            
+            params_insert: dict[str, Any] = {
+                "source_id": proveedor["id"],
+                "chunk_index": idx,
+                "content": chunk
+            }
+
+            session.execute(sql_insert, params_insert)
+
 # clase que se encarga de la configuración y el procesamiento de los datos
 # se incluye el decorador cbv para que se pueda usar como un endpoint de fastapi con las rutas definidas en el router 
 @cbv(chat_clase_03_api_router)
@@ -178,79 +275,15 @@ class ChatClase03:
     @chat_clase_03_api_router.post("/api/sync_embeddings")
     def sync_embeddings(self):
         session = SessionLocal()
+
+        embeddings: List[List[float]] = self.embeddings
         
         try:
             # Productos (join con terceros para obtener el nombre del proveedor)
-            productos = session.execute(text(
-                """
-                SELECT p.id,
-                       p.sku,
-                       p.nombre,
-                       p.precio_venta,
-                       p.cantidad,
-                       p.proveedor_id,
-                       COALESCE(t.razon_social, (COALESCE(t.nombres, '') || ' ' || COALESCE(t.apellidos, ''))) AS proveedor_nombre
-                FROM productos p
-                LEFT JOIN terceros t ON t.id = p.proveedor_id
-                """
-            )).mappings().all()
-            prod_texts = [_build_product_content(p) for p in productos]
-            prod_vecs = _embed_texts(self.embeddings, prod_texts)
-
-            for row, vec, content in zip(productos, prod_vecs, prod_texts):
-                sql = text(
-                    f"""
-                    INSERT INTO productos_vec (source_id, content, embedding, metadata)
-                    VALUES (:source_id, :content, { _arr_to_sql_vector(vec) }, :metadata)
-                    ON CONFLICT (source_id) DO UPDATE SET
-                        content = EXCLUDED.content,
-                        embedding = EXCLUDED.embedding,
-                        metadata = EXCLUDED.metadata,
-                        created_at = NOW();
-                    """
-                ).bindparams(bindparam("metadata", type_=JSONB))
-
-                metadata_payload = {
-                    "proveedor_id": row.get("proveedor_id"),
-                    "proveedor_nombre": row.get("proveedor_nombre"),
-                }
-
-                session.execute(sql, {"source_id": row["id"], "content": content, "metadata": metadata_payload})
+            _sync_productos_embedding(session, embeddings)
 
             # Proveedores (terceros tipo proveedor) con segmentación
-            proveedores = session.execute(text(
-                """
-                SELECT id, tipo_documento, numero_documento, razon_social, nombres, apellidos,
-                       telefono_fijo, telefono_celular, direccion, email, email_facturacion
-                FROM terceros WHERE tipo_tercero = 'proveedor'
-                """
-            )).mappings().all()
-
-            for proveedor in proveedores:
-                base_text = _build_tercero_content(proveedor)
-
-                chunks = _chunk_text(base_text, chunk_size=600, overlap=100)
-                if (not chunks): chunks = [base_text]
-                
-                chunk_vecs = _embed_texts(self.embeddings, chunks)
-
-                for idx, (chunk, vec) in enumerate(zip(chunks, chunk_vecs)):
-                    sql: str = text(f"""
-                        INSERT INTO proveedores_vec (source_id, chunk_index, content, embedding, metadata)
-                        VALUES (:source_id, :chunk_index, :content, { _arr_to_sql_vector(vec) }, '{{}}'::jsonb)
-                        ON CONFLICT (source_id, chunk_index) DO UPDATE SET
-                            content = EXCLUDED.content,
-                            embedding = EXCLUDED.embedding,
-                            metadata = EXCLUDED.metadata,
-                            created_at = NOW();
-                        """)
-                    params: dict[str, Any] = {
-                        "source_id": proveedor["id"],
-                        "chunk_index": idx,
-                        "content": chunk
-                    }
-
-                    session.execute(sql, params)
+            _sync_proveedor_embedding(session, embeddings)
 
             # Clientes: eliminado
 

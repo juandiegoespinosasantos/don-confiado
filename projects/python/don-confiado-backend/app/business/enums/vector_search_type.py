@@ -11,4 +11,4 @@ class VectorSearchType(str, Enum):
 
     EUCLIDEAN_DISTANCE = ("EUCLIDEAN", "<->")
     COSINE_DISTANCE = ("COSINE", "<=>")
-    DOT_RPODUCT_DISTANCE = ("DOT_RPODUCT", "<#>")
+    DOT_PRODUCT_DISTANCE = ("DOT_PRODUCT", "<#>")

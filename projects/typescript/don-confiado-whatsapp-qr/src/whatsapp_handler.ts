@@ -161,7 +161,7 @@ class WhatsAppHandler {
             msg.message.extendedTextMessage?.text ||
             "No texto disponible";
 
-          fetch("http://127.0.0.1:8000/api/chat_clase_03", {
+          fetch("http://127.0.0.1:8000/api/chat_clase_03?vector_search_type=COSINE", { // type=[EUCLIDEAN,COSINE,DOT_PRODUCT]
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -172,6 +172,7 @@ class WhatsAppHandler {
               mime_type: mime_type,
               file_base64: mime_type ? fileToBase64(filename) : null
             }),
+
             redirect: "follow",
           })
             .then((response) => response.json())

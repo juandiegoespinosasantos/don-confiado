@@ -14,3 +14,8 @@ env*/
 .env.*
 !.env.example
 
+# Temporarily ignore notebooks directory
+notebooks/
+
+projects/python/don-confiado-backend/app/sql/*.csv
+

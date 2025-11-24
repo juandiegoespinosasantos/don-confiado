@@ -6,6 +6,9 @@ import tempfile
 
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
+import nest_asyncio
+
+nest_asyncio.apply()
 
 # Import neo4j-graphrag components
 try:
@@ -43,11 +46,13 @@ def _read_text_from_pdf(file_path: str) -> str:
     
     reader = PdfReader(file_path)
     pages = []
+
     for p in reader.pages:
         try:
             pages.append(p.extract_text() or "")
         except Exception:
             pages.append("")
+
     return "\n\n".join(pages).strip()
 
 
@@ -56,6 +61,7 @@ def _get_driver():
     uri = os.getenv("NEO4J_URI")
     user = os.getenv("NEO4J_USERNAME") or os.getenv("NEO4J_USER")
     password = os.getenv("NEO4J_PASSWORD")
+
     return GraphDatabase.driver(uri, auth=(user, password))
 
 
@@ -66,13 +72,16 @@ def _setup_llm_and_embeddings():
     
     # Use OpenAI for neo4j-graphrag compatibility
     openai_api_key = os.getenv("OPENAI_API_KEY")
+
     if not openai_api_key:
         raise RuntimeError("OPENAI_API_KEY not configured for neo4j-graphrag")
     
     llm = LLM(
         model_name="gpt-4o-mini",
         model_params={
-            "response_format": {"type": "json_object"},
+            "response_format": {
+                "type": "json_object"
+            },
             "temperature": 0
         }
     )
@@ -201,6 +210,7 @@ def ingest_with_ontology(
         def run_in_thread():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+
             try:
                 return loop.run_until_complete(kg_builder.run_async(text=text))
             finally:

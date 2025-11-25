@@ -44,14 +44,15 @@ class ChatClase04:
         Enhanced ingestion with ontology-based knowledge extraction
         """
         try:
-            if pdf is None and not text:
+            if (pdf is None and not text):
                 raise HTTPException(status_code=400, detail="Provide a PDF or text")
 
-            if pdf is not None:
+            if (pdf is not None):
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                     data = await pdf.read()
                     tmp.write(data)
                     tmp_path = tmp.name
+                    
                 try:
                     job_id = ingest_pdf_with_ontology(
                         tmp_path, 
@@ -78,8 +79,8 @@ class ChatClase04:
             }
         except HTTPException:
             raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
 
     @graphrag_api_router.post("/api/graphrag/enhanced/ask")
     def enhanced_ask(
@@ -111,8 +112,8 @@ class ChatClase04:
                 "retrieval_method": retrieval_method,
                 "top_k": top_k
             }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
 
     @graphrag_api_router.get("/api/graphrag/enhanced/job/{job_id}")
     def get_enhanced_job_status(self, job_id: str):
@@ -121,9 +122,13 @@ class ChatClase04:
         """
         try:
             status = get_enhanced_job(job_id)
-            return {"job_id": job_id, **status}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+
+            return {
+                "job_id": job_id, 
+                **status
+            }
+        except Exception as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
 
     @graphrag_api_router.get("/api/graphrag/enhanced/stats")
     def get_knowledge_graph_stats_endpoint(self):
@@ -132,9 +137,13 @@ class ChatClase04:
         """
         try:
             stats = get_knowledge_graph_stats()
-            return {"ok": True, "stats": stats}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            
+            return {
+                "ok": True, 
+                "stats": stats
+            }
+        except Exception as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
 
     @graphrag_api_router.get("/api/graphrag/enhanced/ontology/{ontology_type}/stats")
     def get_ontology_stats_endpoint(self, ontology_type: str):
@@ -143,9 +152,14 @@ class ChatClase04:
         """
         try:
             stats = get_ontology_stats(ontology_type)
-            return {"ok": True, "ontology_type": ontology_type, "stats": stats}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+
+            return {
+                "ok": True, 
+                "ontology_type": ontology_type, 
+                "stats": stats
+            }
+        except Exception as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
 
     @graphrag_api_router.get("/api/graphrag/enhanced/entity/{entity_name}/relationships")
     def get_entity_relationships_endpoint(
@@ -158,13 +172,14 @@ class ChatClase04:
         """
         try:
             relationships = get_entity_relationships(entity_name, max_hops)
+
             return {
                 "entity_name": entity_name,
                 "max_hops": max_hops,
                 "relationships": relationships
             }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
 
     @graphrag_api_router.delete("/api/graphrag/enhanced/ontology/{ontology_type}/clear")
     def clear_ontology_data_endpoint(self, ontology_type: str):
@@ -173,12 +188,11 @@ class ChatClase04:
         """
         try:
             success = clear_ontology_data(ontology_type)
+
             return {
                 "ok": success,
                 "ontology_type": ontology_type,
                 "message": "Data cleared successfully" if success else "Failed to clear data"
             }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-
+        except Exception as ex:
+            raise HTTPException(status_code=500, detail=str(ex))
